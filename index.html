@@ -1,0 +1,832 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>First Light</title>
+<meta name="description" content="Follow the sunrise around the world: a webcam where the sun has just come up, with the sound of that place's morning.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,300;9..144,400;9..144,500&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/d3@7/dist/d3.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/topojson-client@3/dist/topojson-client.min.js"></script>
+<style>
+:root {
+  --bg: #060a12;
+  --bg-2: #0b1220;
+  --panel: rgba(13, 20, 34, 0.82);
+  --ink: #ece6d8;
+  --ink-2: #b9b4a8;
+  --muted: #7d8699;
+  --line: rgba(236, 230, 216, 0.10);
+  --dawn: #f3b35f;
+  --dawn-2: #e8846a;
+  --live: #8fd6c4;
+  --rec: #c7b6f2;
+  --radio: #9cc2ef;
+  --serif: "Fraunces", Georgia, serif;
+  --sans: "IBM Plex Sans", system-ui, sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, monospace;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; }
+body {
+  background: radial-gradient(120% 90% at 30% 50%, #0c1424 0%, var(--bg) 60%);
+  color: var(--ink);
+  font-family: var(--sans);
+  overflow: hidden;
+}
+body.idle, body.idle * { cursor: none !important; }
+a { color: inherit; }
+
+#stage { position: fixed; inset: 0; display: grid; grid-template-columns: 1fr 460px; align-items: center; }
+#globe { width: 100%; height: 100%; display: block; }
+
+#card {
+  margin-right: 48px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  padding: 26px 26px 18px;
+  backdrop-filter: blur(10px);
+  max-height: calc(100vh - 64px);
+  overflow: auto;
+  transition: opacity .8s ease;
+}
+#card.fading { opacity: 0; }
+
+.eyebrow { display: flex; justify-content: space-between; font: 500 11px/1 var(--mono); letter-spacing: .16em; text-transform: uppercase; color: var(--muted); }
+.eyebrow b { color: var(--dawn); font-weight: 500; }
+
+#place { font: 400 44px/1.02 var(--serif); letter-spacing: -0.01em; margin: 18px 0 4px; font-variation-settings: "opsz" 120; }
+#country { color: var(--ink-2); font-size: 15px; }
+#sunline { margin-top: 14px; display: flex; gap: 14px; flex-wrap: wrap; font: 400 13px/1.4 var(--mono); color: var(--ink-2); }
+#sunline span b { color: var(--ink); font-weight: 500; }
+
+#frame {
+  position: relative; margin: 20px 0 8px; border-radius: 10px; overflow: hidden;
+  background: var(--bg-2); min-height: 120px; display: flex; align-items: center; justify-content: center;
+  border: 1px solid var(--line);
+}
+#frame canvas.sky { display: block; width: 100%; height: auto; }
+#frame img { display: block; max-width: 100%; height: auto; }
+#frame iframe { display: block; width: 100%; aspect-ratio: 16 / 9; border: 0; }
+#frame .note { position: absolute; left: 12px; bottom: 10px; font: 400 11px/1.3 var(--mono); color: rgba(255,255,255,.75); text-shadow: 0 1px 2px rgba(0,0,0,.6); }
+#camcap { font: 400 12px/1.5 var(--mono); color: var(--muted); min-height: 18px; }
+#camcap a { color: var(--ink-2); text-decoration: none; border-bottom: 1px solid var(--line); }
+#camcap button { background: none; border: 0; color: var(--dawn); font: inherit; padding: 0; cursor: pointer; }
+
+#sound { margin-top: 18px; padding-top: 16px; border-top: 1px solid var(--line); }
+.tag { display: inline-flex; align-items: center; gap: 8px; font: 500 10.5px/1 var(--mono); letter-spacing: .14em; text-transform: uppercase; padding: 6px 10px 6px 8px; border-radius: 999px; border: 1px solid currentColor; }
+.tag i { width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+.tag.live { color: var(--live); } .tag.live i { animation: pulse 1.6s ease-in-out infinite; }
+.tag.rec { color: var(--rec); }
+.tag.radio { color: var(--radio); }
+.tag.none { color: var(--muted); }
+@keyframes pulse { 50% { opacity: .25; } }
+#stitle { margin-top: 12px; font-size: 16px; line-height: 1.35; }
+#smeta { margin-top: 4px; font: 400 12px/1.5 var(--mono); color: var(--muted); }
+#smeta a { color: var(--ink-2); text-decoration: none; border-bottom: 1px solid var(--line); }
+
+#controls { display: flex; align-items: center; gap: 10px; margin-top: 16px; }
+#controls button {
+  white-space: nowrap;
+  background: rgba(255,255,255,.04); border: 1px solid var(--line); color: var(--ink);
+  height: 34px; min-width: 34px; padding: 0 12px; border-radius: 999px; font: 500 12px var(--mono); cursor: pointer;
+}
+#controls button:hover { border-color: rgba(236,230,216,.3); }
+#vol { flex: 1; accent-color: var(--dawn); }
+#countdown { font: 400 12px var(--mono); color: var(--muted); white-space: nowrap; }
+
+#also { margin-top: 16px; font: 400 12px/1.6 var(--mono); color: var(--muted); }
+#also b { color: var(--ink-2); font-weight: 400; }
+
+#credits { margin-top: 18px; padding-top: 12px; border-top: 1px solid var(--line); font: 400 10.5px/1.6 var(--mono); color: var(--muted); }
+#credits a { color: var(--ink-2); }
+
+#start {
+  position: fixed; inset: 0; display: flex; align-items: center; justify-content: center;
+  background: radial-gradient(80% 70% at 50% 60%, rgba(243,179,95,.10), rgba(6,10,18,.92) 60%);
+  z-index: 10; transition: opacity 1s ease;
+}
+#start.gone { opacity: 0; pointer-events: none; }
+#start .inner { max-width: 520px; padding: 0 24px; text-align: center; }
+#start h1 { font: 300 64px/1 var(--serif); margin: 0 0 18px; letter-spacing: -0.02em; }
+#start p { color: var(--ink-2); line-height: 1.6; margin: 0 0 28px; }
+#start button {
+  font: 500 13px var(--mono); letter-spacing: .16em; text-transform: uppercase;
+  color: #1a1205; background: var(--dawn); border: 0; border-radius: 999px; padding: 14px 26px; cursor: pointer;
+}
+#start small { display: block; margin-top: 18px; color: var(--muted); font: 400 11px var(--mono); }
+
+@media (max-width: 980px) {
+  body { overflow: auto; }
+  #stage { position: static; display: block; }
+  #globe { height: 56vh; }
+  #card { margin: 0 16px 24px; max-height: none; }
+  #place { font-size: 36px; }
+}
+</style>
+</head>
+<body>
+<div id="stage">
+  <canvas id="globe" aria-label="Globe showing the line where the sun is rising"></canvas>
+  <aside id="card" aria-live="polite">
+    <div class="eyebrow"><span><b>First Light</b></span><span id="utc">--:-- UTC</span></div>
+    <div id="place">Finding the sunrise…</div>
+    <div id="country">&nbsp;</div>
+    <div id="sunline"></div>
+    <div id="frame"></div>
+    <div id="camcap"></div>
+    <div id="sound">
+      <span id="stag" class="tag none"><i></i><span>Waiting</span></span>
+      <div id="stitle">&nbsp;</div>
+      <div id="smeta">&nbsp;</div>
+      <div id="controls">
+        <button id="bplay" title="Pause or play (space)">Pause</button>
+        <button id="bnext" title="Move on now (N)">Next ›</button>
+        <input id="vol" type="range" min="0" max="1" step="0.01" value="0.8" aria-label="Volume">
+        <span id="countdown"></span>
+      </div>
+    </div>
+    <div id="also"></div>
+    <div id="credits">
+      Webcams provided by <a href="https://www.windy.com/" target="_blank" rel="noopener">windy.com</a> — <a href="https://www.windy.com/webcams/add" target="_blank" rel="noopener">add a webcam</a>.
+      Live microphones from <a href="https://locusonus.org/soundmap/" target="_blank" rel="noopener">Locustream, Locus Sonus</a>.
+      Recordings from <a href="https://freesound.org/" target="_blank" rel="noopener">Freesound</a>.
+      Radio via <a href="https://www.radio-browser.info/" target="_blank" rel="noopener">Radio Browser</a>.
+      Places and coastlines: <a href="https://www.naturalearthdata.com/" target="_blank" rel="noopener">Natural Earth</a>.
+    </div>
+  </aside>
+</div>
+
+<div id="start">
+  <div class="inner">
+    <h1>First Light</h1>
+    <p>Somewhere, the sun is coming up. This page goes there, shows you what it looks like, and plays the sound of that morning: a live microphone if one is listening, a field recording if someone made one, the local radio if not. Every few minutes it moves west with the dawn.</p>
+    <button id="begin">Begin</button>
+    <small>Sound on · Space pauses · N moves on · F goes full screen</small>
+  </div>
+</div>
+
+<script>
+"use strict";
+
+/* ---------------------------------------------------------------
+   Settings
+   WORKER_URL: the Cloudflare Worker that holds the Windy key
+   (see README). Leave empty to run without webcams.
+   --------------------------------------------------------------- */
+const CONFIG = {
+  WORKER_URL: "",
+  DWELL_MIN: 8,            // minutes at each place
+  CAM_RADIUS_KM: 100,      // first search radius for a webcam
+  DAWN_MIN_ALT: -4,        // degrees: from just before sunrise…
+  DAWN_MAX_ALT: 10,        // …to an hour or so after
+  TARGET_ALT: 2,           // the sweet spot: sun just above the horizon
+  LOCUS_LIST: "https://locusonus.org/soundmap/list/active/json/name",
+  RADIO_API: "https://all.api.radio-browser.info",
+};
+
+const params = new URLSearchParams(location.search);
+if (params.get("worker")) CONFIG.WORKER_URL = params.get("worker");
+if (params.get("dwell")) CONFIG.DWELL_MIN = Math.max(1, Number(params.get("dwell")) || 8);
+
+// ?at=2026-10-21T10:00Z runs the clock from a chosen moment (for testing).
+const clockOffset = params.get("at") ? (Date.parse(params.get("at")) - Date.now()) : 0;
+const now = () => new Date(Date.now() + (Number.isFinite(clockOffset) ? clockOffset : 0));
+
+const store = {
+  get(k, d) { try { const v = localStorage.getItem("fl:" + k); return v === null ? d : JSON.parse(v); } catch { return d; } },
+  set(k, v) { try { localStorage.setItem("fl:" + k, JSON.stringify(v)); } catch {} },
+};
+
+/* ---------------- Sun ---------------- */
+const RAD = Math.PI / 180;
+const norm180 = (x) => ((x + 540) % 360) - 180;
+
+function sunAt(date) {
+  const n = date.getTime() / 86400000 + 2440587.5 - 2451545.0;
+  const L = (280.460 + 0.9856474 * n) % 360;
+  const g = ((357.528 + 0.9856003 * n) % 360) * RAD;
+  const lambda = (L + 1.915 * Math.sin(g) + 0.020 * Math.sin(2 * g)) * RAD;
+  const eps = (23.439 - 0.0000004 * n) * RAD;
+  const ra = Math.atan2(Math.cos(eps) * Math.sin(lambda), Math.cos(lambda)) / RAD;
+  const dec = Math.asin(Math.sin(eps) * Math.sin(lambda)) / RAD;
+  const gmst = ((18.697374558 + 24.06570982441908 * n) % 24 + 24) % 24;
+  return { dec, lon: norm180(ra - gmst * 15) };
+}
+
+// Altitude of the sun (degrees) and hour angle (negative = morning).
+function sunPos(lat, lon, sun) {
+  const H = norm180(lon - sun.lon);
+  const s = Math.sin(lat * RAD) * Math.sin(sun.dec * RAD) + Math.cos(lat * RAD) * Math.cos(sun.dec * RAD) * Math.cos(H * RAD);
+  return { alt: Math.asin(Math.max(-1, Math.min(1, s))) / RAD, H };
+}
+
+// Minutes since sunrise (negative = before). Null in polar day or night.
+function minutesSinceSunrise(lat, lon, sun) {
+  const x = (Math.sin(-0.833 * RAD) - Math.sin(lat * RAD) * Math.sin(sun.dec * RAD)) / (Math.cos(lat * RAD) * Math.cos(sun.dec * RAD));
+  if (x < -1 || x > 1) return null;
+  const H0 = Math.acos(x) / RAD;
+  const { H } = sunPos(lat, lon, sun);
+  return (H + H0) / 15 * 60;
+}
+
+function dawnLine(sun) {
+  const pts = [];
+  for (let lat = -89; lat <= 89; lat += 1) {
+    const x = -Math.tan(lat * RAD) * Math.tan(sun.dec * RAD);
+    if (x < -1 || x > 1) continue;
+    pts.push([norm180(sun.lon - Math.acos(x) / RAD), lat]);
+  }
+  return { type: "LineString", coordinates: pts };
+}
+
+function season(lat, date) {
+  if (Math.abs(lat) < 23.5) return null;
+  const m = date.getUTCMonth();
+  const north = ["winter", "winter", "spring", "spring", "spring", "summer", "summer", "summer", "autumn", "autumn", "autumn", "winter"][m];
+  const flip = { winter: "summer", summer: "winter", spring: "autumn", autumn: "spring" };
+  return lat >= 0 ? north : flip[north];
+}
+
+/* ---------------- Helpers ---------------- */
+function km(a, b) {
+  const dLat = (b.lat - a.lat) * RAD, dLon = (b.lon - a.lon) * RAD;
+  const h = Math.sin(dLat / 2) ** 2 + Math.cos(a.lat * RAD) * Math.cos(b.lat * RAD) * Math.sin(dLon / 2) ** 2;
+  return 2 * 6371 * Math.asin(Math.sqrt(h));
+}
+const titleCase = (s) => {
+  s = String(s || "");
+  if (s !== s.toLowerCase() && s !== s.toUpperCase()) return s; // already mixed case
+  return s.toLowerCase().replace(/(^|[\s\-—(/])(\p{L})/gu, (m, a, c) => a + c.toUpperCase());
+};
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const $ = (id) => document.getElementById(id);
+
+function localTime(tz, date) {
+  try { return new Intl.DateTimeFormat("en-GB", { timeZone: tz, hour: "2-digit", minute: "2-digit" }).format(date); }
+  catch { return ""; }
+}
+
+function licenceName(url) {
+  const u = String(url || "");
+  if (u.includes("publicdomain/zero")) return "CC0";
+  if (u.includes("sampling+")) return "Sampling+";
+  const m = u.match(/licenses\/([a-z-]+)\//);
+  return m ? "CC " + m[1].toUpperCase() : "see licence";
+}
+
+async function getJSON(url, ms = 12000) {
+  const ctl = new AbortController();
+  const t = setTimeout(() => ctl.abort(), ms);
+  try {
+    const r = await fetch(url, { signal: ctl.signal });
+    if (!r.ok) throw new Error(r.status);
+    return await r.json();
+  } finally { clearTimeout(t); }
+}
+
+/* ---------------- Data ---------------- */
+let PLACES = [], SOUNDINGS = { cells: [], placeCell: {} }, MICS = [], LAND = null;
+
+async function loadData() {
+  const [places, soundings, land] = await Promise.all([
+    getJSON("data/places.json"),
+    getJSON("data/soundings.json").catch(() => ({ cells: [], placeCell: {} })),
+    getJSON("https://cdn.jsdelivr.net/npm/world-atlas@2/land-50m.json", 20000).catch(() => null),
+  ]);
+  PLACES = places.places;
+  SOUNDINGS = soundings;
+  if (land) LAND = topojson.feature(land, land.objects.land);
+  await loadMics();
+  setInterval(loadMics, 30 * 60 * 1000);
+}
+
+async function loadMics() {
+  try {
+    const list = await getJSON(CONFIG.LOCUS_LIST);
+    MICS = list.map((m) => ({
+      id: "mic-" + m.id,
+      name: m.name,
+      artist: m.artist,
+      city: m.city,
+      country: m.country,
+      lat: Number(m.lat),
+      lon: Number(m.lng),
+      // GitHub Pages is https, so http streams would be blocked; try https.
+      url: String(m.url).replace(/^http:\/\//, "https://"),
+      upgraded: /^http:\/\//.test(String(m.url)),
+    })).filter((m) => Number.isFinite(m.lat) && Number.isFinite(m.lon));
+  } catch (e) {
+    console.warn("Live microphone list unavailable", e);
+  }
+}
+
+function nearestPlace(pt) {
+  let best = null, d = Infinity;
+  for (const p of PLACES) { const k = km(pt, p); if (k < d) { d = k; best = p; } }
+  return best;
+}
+
+function recordingsFor(place) {
+  const i = SOUNDINGS.placeCell?.[place.id];
+  return i === undefined ? [] : (SOUNDINGS.cells[i]?.recs || []);
+}
+
+/* ---------------- Choosing where to go ---------------- */
+const history = store.get("history", []);   // recent ids, newest first
+
+function candidates(date) {
+  const sun = sunAt(date);
+  const out = [];
+  const inDawn = (p) => {
+    const { alt, H } = sunPos(p.lat, p.lon, sun);
+    return H < 0 && alt >= CONFIG.DAWN_MIN_ALT && alt <= CONFIG.DAWN_MAX_ALT ? alt : null;
+  };
+  for (const m of MICS) {
+    if (deadMics.has(m.id)) continue;
+    const alt = inDawn(m);
+    if (alt !== null) out.push({ kind: "live", alt, ...m });
+  }
+  for (const p of PLACES) {
+    const alt = inDawn(p);
+    if (alt === null) continue;
+    out.push({ kind: recordingsFor(p).length ? "rec" : "radio", alt, ...p, id: "p-" + p.id, placeId: p.id });
+  }
+  const tierWeight = { live: 30, rec: 18, radio: 0 };
+  const last = current?.focus;
+  for (const c of out) {
+    let s = tierWeight[c.kind] - Math.abs(c.alt - CONFIG.TARGET_ALT) * 1.5;
+    if (c.upgraded) s -= 8;                                 // http-only stream, may not work over https
+    const seen = history.indexOf(c.id);
+    if (seen !== -1) s -= 40 - seen;                       // recently shown
+    if (last && km(last, c) < 900) s -= 12;                 // keep moving
+    if (c.pop) s += Math.min(4, Math.log10(c.pop + 1) - 4); // slight lean to known places
+    c.score = s;
+  }
+  return out.sort((a, b) => b.score - a.score);
+}
+
+/* ---------------- Webcams ---------------- */
+async function webcamsNear(pt, radius) {
+  if (!CONFIG.WORKER_URL) return null;
+  const u = new URL("webcams", CONFIG.WORKER_URL.replace(/\/?$/, "/"));
+  u.searchParams.set("lat", pt.lat.toFixed(3));
+  u.searchParams.set("lon", pt.lon.toFixed(3));
+  u.searchParams.set("radius", radius);
+  try {
+    const d = await getJSON(u.toString(), 15000);
+    return (d.webcams || []).filter((w) => w.preview && w.status !== "inactive")
+      .map((w) => ({ ...w, km: (Number.isFinite(w.lat) ? km(pt, w) : null) }))
+      .sort((a, b) => (a.km ?? 1e9) - (b.km ?? 1e9));
+  } catch (e) {
+    console.warn("Webcam lookup failed", e);
+    return [];
+  }
+}
+
+async function findCamera(pt) {
+  let cams = await webcamsNear(pt, CONFIG.CAM_RADIUS_KM);
+  if (cams && !cams.length) cams = await webcamsNear(pt, 220);
+  return cams;   // null = no worker configured; [] = none nearby
+}
+
+/* ---------------- Audio ---------------- */
+let deck = null;          // the <audio> currently audible
+let paused = false;
+
+function volume() { return Number($("vol").value); }
+
+function tryPlay(url, { loop = false, timeout = 12000 } = {}) {
+  return new Promise((resolve, reject) => {
+    const a = new Audio();
+    a.preload = "auto";
+    a.loop = loop;
+    a.volume = 0;
+    let done = false;
+    const fail = (why) => { if (done) return; done = true; a.pause(); a.removeAttribute("src"); a.load(); reject(new Error(why)); };
+    const t = setTimeout(() => fail("timeout"), timeout);
+    a.addEventListener("playing", () => { if (done) return; done = true; clearTimeout(t); resolve(a); }, { once: true });
+    a.addEventListener("error", () => { clearTimeout(t); fail("error"); }, { once: true });
+    a.src = url;
+    a.play().catch((e) => { clearTimeout(t); fail(e.message); });
+  });
+}
+
+function fade(a, to, ms) {
+  return new Promise((res) => {
+    const from = a.volume, t0 = performance.now();
+    const step = (t) => {
+      const k = Math.min(1, (t - t0) / ms);
+      a.volume = Math.max(0, Math.min(1, from + (to - from) * k));
+      k < 1 ? requestAnimationFrame(step) : res();
+    };
+    requestAnimationFrame(step);
+  });
+}
+
+async function swapTo(a) {
+  const old = deck;
+  deck = a;
+  if (paused) { a.pause(); a.volume = volume(); }
+  else fade(a, volume(), 3000);
+  if (old) { await fade(old, 0, 3000); old.pause(); old.removeAttribute("src"); old.load(); }
+}
+
+// Microphones that failed to play this session are left out for six hours.
+const deadMics = new Set(Object.entries(store.get("deadMics", {}))
+  .filter(([, t]) => Date.now() - t < 6 * 3600000).map(([id]) => id));
+
+async function liveAudio(mic) {
+  let a;
+  try { a = await tryPlay(mic.url); }
+  catch (e) {
+    deadMics.add(mic.id);
+    const saved = store.get("deadMics", {}); saved[mic.id] = Date.now(); store.set("deadMics", saved);
+    throw e;
+  }
+  return {
+    audio: a, kind: "live",
+    title: titleCase(mic.name.replace(/\s+—\s+/, " — ")),
+    meta: `Live now · ${esc(mic.artist || "volunteer streamer")} · <a href="https://locusonus.org/soundmap/" target="_blank" rel="noopener">Locustream</a>`,
+    at: mic,
+  };
+}
+
+async function recordingAudio(place, date, here) {
+  const recs = recordingsFor(place);
+  if (!recs.length) throw new Error("no recordings");
+  const want = season(place.lat, date);
+  const played = store.get("played", []);
+  const ranked = [...recs].sort((a, b) => {
+    const sa = (a.season === want ? 6 : a.season ? -4 : 0) + (a.dawn ? 4 : 0) + a.score - (played.includes(a.id) ? 10 : 0);
+    const sb = (b.season === want ? 6 : b.season ? -4 : 0) + (b.dawn ? 4 : 0) + b.score - (played.includes(b.id) ? 10 : 0);
+    return sb - sa;
+  });
+  for (const r of ranked) {
+    try {
+      const a = await tryPlay(r.preview, { loop: true });
+      store.set("played", [r.id, ...played.filter((x) => x !== r.id)].slice(0, 200));
+      const seasonNote = r.season ? ` · tagged ${r.season}` : "";
+      return {
+        audio: a, kind: "rec",
+        title: r.title,
+        meta: `<a href="${esc(r.page)}" target="_blank" rel="noopener">${esc(r.user)}</a> · ${licenceName(r.licence)} · Freesound · recorded ${Math.round(km(here, r))} km from here${seasonNote}`,
+        at: r,
+      };
+    } catch { /* try the next one */ }
+  }
+  throw new Error("recordings would not play");
+}
+
+async function radioAudio(place) {
+  const base = CONFIG.RADIO_API + "/json/stations/search";
+  const common = "&is_https=true&hidebroken=true&order=clickcount&reverse=true&limit=12";
+  let list = [];
+  try { list = await getJSON(`${base}?geo_lat=${place.lat}&geo_long=${place.lon}&geo_distance=80000${common}`); } catch {}
+  if (!list.length && place.iso) {
+    try { list = await getJSON(`${base}?countrycode=${place.iso}${common}`); } catch {}
+  }
+  let attempts = 0;
+  for (const s of list) {
+    const url = s.url_resolved || s.url;
+    if (!/^https:/.test(url)) continue;
+    if (++attempts > 5) break;
+    try {
+      const a = await tryPlay(url, { timeout: 9000 });
+      fetch(`${CONFIG.RADIO_API}/json/url/${s.stationuuid}`).catch(() => {}); // Radio Browser asks clients to report plays
+      return {
+        audio: a, kind: "radio",
+        title: s.name.trim(),
+        meta: `${esc(s.state || place.name)}, ${esc(s.country || place.country)} · via Radio Browser`,
+        at: s,
+      };
+    } catch { /* next station */ }
+  }
+  throw new Error("no radio would play");
+}
+
+async function soundFor(focus, place, date) {
+  const tries = [];
+  if (focus.kind === "live") tries.push(() => liveAudio(focus));
+  tries.push(() => recordingAudio(place, date, focus));
+  tries.push(() => radioAudio(place));
+  for (const t of tries) {
+    try { return await t(); } catch (e) { console.info("sound fallback:", e.message); }
+  }
+  return null;
+}
+
+/* ---------------- Sky fallback for the picture ---------------- */
+function drawSky(alt, label) {
+  const c = document.createElement("canvas");
+  c.className = "sky";
+  c.width = 816; c.height = 459;
+  const g = c.getContext("2d");
+  const k = Math.max(0, Math.min(1, (alt + 6) / 16)); // 0 at civil dawn → 1 when well up
+  const top = d3.interpolateRgb("#0b1530", "#5d86b8")(k);
+  const mid = d3.interpolateRgb("#3b2e55", "#c9d8e6")(k);
+  const low = d3.interpolateRgb("#e8846a", "#f6e2b8")(Math.min(1, k * 1.4));
+  const grad = g.createLinearGradient(0, 0, 0, c.height);
+  grad.addColorStop(0, top); grad.addColorStop(0.62, mid); grad.addColorStop(0.8, low); grad.addColorStop(1, "#0d0f14");
+  g.fillStyle = grad; g.fillRect(0, 0, c.width, c.height);
+  const horizon = c.height * 0.8;
+  const sunY = horizon - alt * 14;
+  const halo = g.createRadialGradient(c.width * 0.62, sunY, 4, c.width * 0.62, sunY, 220);
+  halo.addColorStop(0, "rgba(255,226,170,.9)"); halo.addColorStop(1, "rgba(255,226,170,0)");
+  g.fillStyle = halo; g.fillRect(0, 0, c.width, c.height);
+  g.save(); g.beginPath(); g.rect(0, 0, c.width, horizon); g.clip();
+  g.fillStyle = "#fff1d0"; g.beginPath(); g.arc(c.width * 0.62, sunY, 16, 0, Math.PI * 2); g.fill();
+  g.restore();
+  g.fillStyle = "#0d0f14"; g.fillRect(0, horizon, c.width, c.height - horizon);
+  const wrap = document.createDocumentFragment();
+  wrap.appendChild(c);
+  if (label) { const n = document.createElement("div"); n.className = "note"; n.textContent = label; wrap.appendChild(n); }
+  return wrap;
+}
+
+/* ---------------- Showing a place ---------------- */
+let current = null;
+let busy = false;
+let nextAt = 0;
+
+async function go(skipIds = []) {
+  if (busy) return;
+  busy = true;
+  try {
+    const date = now();
+    const list = candidates(date).filter((c) => !skipIds.includes(c.id));
+    if (!list.length) { showEmpty(); return; }
+
+    // Find the best candidate that has a camera; keep live mics even without one.
+    let pick = null, cams = null;
+    for (const c of list.slice(0, 6)) {
+      cams = await findCamera(c);
+      if (cams === null || cams.length || c.kind === "live") { pick = c; break; }
+    }
+    if (!pick) { pick = list[0]; cams = []; }
+
+    const place = pick.kind === "live" ? nearestPlace(pick) : PLACES.find((p) => p.id === pick.placeId);
+
+    $("card").classList.add("fading");
+    await new Promise((r) => setTimeout(r, 700));
+
+    const visit = { focus: pick, place, cams, sound: undefined, alsoAwake: list.filter((c) => c.id !== pick.id && c.kind !== "live").slice(0, 4) };
+    current = visit;
+    history.unshift(pick.id);
+    history.splice(30);
+    store.set("history", history);
+
+    render(date);
+    $("card").classList.remove("fading");
+    nextAt = Date.now() + CONFIG.DWELL_MIN * 60000;
+
+    // Picture first, then tune in: finding a stream that plays can take a while.
+    busy = false;
+    const sound = await soundFor(pick, place, date);
+    if (current !== visit) { sound?.audio.pause(); return; }
+    visit.sound = sound;
+    renderSound();
+    if (sound) await swapTo(sound.audio);
+    else if (deck) { await fade(deck, 0, 2000); deck.pause(); deck = null; }
+  } catch (e) {
+    console.error(e);
+    nextAt = Date.now() + 60000;
+  } finally {
+    busy = false;
+  }
+}
+
+function render(date) {
+  const { focus, place, cams, sound, alsoAwake } = current;
+  const sun = sunAt(date);
+  const label = focus.kind === "live" ? titleCase(focus.city || place.name) : place.name;
+  const country = focus.kind === "live" ? (focus.country || place.country) : place.country;
+  $("place").textContent = label;
+  $("country").textContent = country && country !== label ? country : " ";
+
+  const mins = minutesSinceSunrise(focus.lat, focus.lon, sun);
+  const { alt } = sunPos(focus.lat, focus.lon, sun);
+  const tz = place?.tz;
+  const sunText = mins === null ? "No sunrise today" :
+    mins >= 0 ? `Sun up <b>${Math.round(mins)} min</b>` : `Sunrise in <b>${Math.round(-mins)} min</b>`;
+  $("sunline").innerHTML = `<span>${sunText}</span><span>Sun <b>${alt >= 0 ? "+" : ""}${alt.toFixed(1)}°</b></span>${tz ? `<span>Local <b>${localTime(tz, date)}</b></span>` : ""}`;
+
+  const frame = $("frame");
+  frame.innerHTML = "";
+  const cam = cams && cams[0];
+  if (cam) {
+    const a = document.createElement("a");
+    a.href = cam.detail || "https://www.windy.com/webcams";
+    a.target = "_blank"; a.rel = "noopener";
+    const img = new Image();
+    img.alt = cam.title || "Webcam";
+    img.src = cam.preview;
+    img.onerror = () => refreshCamera();
+    a.appendChild(img);
+    frame.appendChild(a);
+    const dist = Number.isFinite(cam.km) ? ` · ${Math.round(cam.km)} km away` : "";
+    const replay = cam.playerDay ? ` · <button id="replay">Replay the last day</button>` : "";
+    $("camcap").innerHTML = `<a href="${esc(a.href)}" target="_blank" rel="noopener">${esc(cam.title || "Webcam")}</a>${dist}${replay}`;
+    const rb = $("replay");
+    if (rb) rb.onclick = () => {
+      frame.innerHTML = `<iframe src="${esc(cam.playerDay)}" title="Webcam timelapse" allow="fullscreen"></iframe>`;
+      rb.textContent = "Back to the still";
+      rb.onclick = () => render(now());
+    };
+  } else {
+    const why = cams === null ? "No webcams yet: add your Worker URL to show them." : "No webcam within 220 km. This is the sky at this sun height.";
+    frame.appendChild(drawSky(alt, why));
+    $("camcap").textContent = "";
+  }
+
+  renderSound();
+
+  $("also").innerHTML = alsoAwake.length ? `Also waking up: ${alsoAwake.map((c) => `<b>${esc(c.name)}</b>`).join(" · ")}` : "";
+  target = { lon: focus.lon, lat: focus.lat };
+}
+
+function renderSound() {
+  const { sound, focus } = current;
+  const tag = $("stag");
+  if (sound === undefined) {
+    tag.className = "tag none";
+    tag.querySelector("span").textContent = "Tuning in";
+    $("stitle").textContent = focus.kind === "live" ? "Connecting to a live microphone…" : "Looking for the sound of this morning…";
+    $("smeta").innerHTML = "&nbsp;";
+  } else if (sound) {
+    const names = { live: "Live microphone", rec: "Field recording", radio: "Local radio" };
+    tag.className = "tag " + sound.kind;
+    tag.querySelector("span").textContent = names[sound.kind];
+    $("stitle").textContent = sound.title;
+    $("smeta").innerHTML = sound.meta;
+  } else {
+    tag.className = "tag none";
+    tag.querySelector("span").textContent = "Silence";
+    $("stitle").textContent = "Nothing would play here";
+    $("smeta").textContent = "No live microphone, recording or radio stream answered.";
+  }
+}
+
+async function refreshCamera() {
+  if (!current) return;
+  current.cams = await findCamera(current.focus);
+  render(now());
+}
+
+function showEmpty() {
+  $("place").textContent = "Between dawns";
+  $("country").textContent = "No mapped place is at sunrise this minute.";
+  nextAt = Date.now() + 60000;
+}
+
+/* ---------------- Globe ---------------- */
+const canvas = $("globe");
+const ctx = canvas.getContext("2d");
+const projection = d3.geoOrthographic().clipAngle(90).precision(0.4);
+const path = d3.geoPath(projection, ctx);
+const graticule = d3.geoGraticule10();
+let target = { lon: 0, lat: 20 };
+let view = { lon: 0, lat: 20 };
+
+function resize() {
+  const r = canvas.getBoundingClientRect();
+  const dpr = Math.min(2, window.devicePixelRatio || 1);
+  canvas.width = Math.round(r.width * dpr);
+  canvas.height = Math.round(r.height * dpr);
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  projection.translate([r.width / 2, r.height / 2]).scale(Math.min(r.width, r.height) * 0.43);
+}
+window.addEventListener("resize", resize);
+
+function drawGlobe() {
+  const r = canvas.getBoundingClientRect();
+  const date = now();
+  const sun = sunAt(date);
+
+  // Ease towards the focus; tilt only part way so the poles stay readable.
+  view.lon += norm180(target.lon - view.lon) * 0.04;
+  view.lat += (target.lat * 0.55 - view.lat) * 0.04;
+  projection.rotate([-view.lon, -view.lat, 0]);
+
+  ctx.clearRect(0, 0, r.width, r.height);
+  const [cx, cy] = projection.translate();
+  const R = projection.scale();
+
+  const halo = ctx.createRadialGradient(cx, cy, R * 0.9, cx, cy, R * 1.25);
+  halo.addColorStop(0, "rgba(243,179,95,0.10)"); halo.addColorStop(1, "rgba(243,179,95,0)");
+  ctx.fillStyle = halo; ctx.beginPath(); ctx.arc(cx, cy, R * 1.25, 0, Math.PI * 2); ctx.fill();
+
+  const sea = ctx.createRadialGradient(cx - R * 0.3, cy - R * 0.35, R * 0.1, cx, cy, R);
+  sea.addColorStop(0, "#13233d"); sea.addColorStop(1, "#08111f");
+  ctx.beginPath(); path({ type: "Sphere" }); ctx.fillStyle = sea; ctx.fill();
+
+  ctx.beginPath(); path(graticule); ctx.strokeStyle = "rgba(236,230,216,0.05)"; ctx.lineWidth = 0.6; ctx.stroke();
+
+  if (LAND) {
+    ctx.beginPath(); path(LAND);
+    ctx.fillStyle = "#26324a"; ctx.fill();
+    ctx.strokeStyle = "rgba(236,230,216,0.12)"; ctx.lineWidth = 0.5; ctx.stroke();
+  }
+
+  // Day side: a faint warm wash around the point under the sun.
+  for (const [radius, a] of [[90, 0.05], [70, 0.04], [45, 0.04]]) {
+    ctx.beginPath(); path(d3.geoCircle().center([sun.lon, sun.dec]).radius(radius)());
+    ctx.fillStyle = `rgba(255,214,160,${a})`; ctx.fill();
+  }
+  // Night: layered circles around the point opposite the sun.
+  const anti = [norm180(sun.lon + 180), -sun.dec];
+  for (const [radius, a] of [[90, 0.20], [87, 0.14], [84, 0.14], [78, 0.16], [72, 0.14]]) {
+    ctx.beginPath(); path(d3.geoCircle().center(anti).radius(radius)());
+    ctx.fillStyle = `rgba(2,4,10,${a})`; ctx.fill();
+  }
+
+  // The dawn line.
+  const line = dawnLine(sun);
+  ctx.beginPath(); path(line); ctx.strokeStyle = "rgba(243,179,95,0.16)"; ctx.lineWidth = 9; ctx.stroke();
+  ctx.beginPath(); path(line); ctx.strokeStyle = "rgba(243,179,95,0.35)"; ctx.lineWidth = 4; ctx.stroke();
+  ctx.beginPath(); path(line); ctx.strokeStyle = "#f6c27a"; ctx.lineWidth = 1.4; ctx.stroke();
+
+  // Live microphones.
+  for (const m of MICS) {
+    const p = projection([m.lon, m.lat]);
+    if (!p || d3.geoDistance([m.lon, m.lat], [view.lon, view.lat]) > Math.PI / 2) continue;
+    ctx.beginPath(); ctx.arc(p[0], p[1], 2.2, 0, Math.PI * 2);
+    ctx.fillStyle = "rgba(143,214,196,0.85)"; ctx.fill();
+  }
+
+  // Focus marker.
+  if (current) {
+    const f = [current.focus.lon, current.focus.lat];
+    if (d3.geoDistance(f, [view.lon, view.lat]) < Math.PI / 2) {
+      const p = projection(f);
+      const t = (performance.now() % 2400) / 2400;
+      ctx.beginPath(); ctx.arc(p[0], p[1], 6 + t * 22, 0, Math.PI * 2);
+      ctx.strokeStyle = `rgba(243,179,95,${0.7 * (1 - t)})`; ctx.lineWidth = 1.5; ctx.stroke();
+      ctx.beginPath(); ctx.arc(p[0], p[1], 4.5, 0, Math.PI * 2); ctx.fillStyle = "#f6c27a"; ctx.fill();
+    }
+  }
+
+  ctx.beginPath(); path({ type: "Sphere" }); ctx.strokeStyle = "rgba(236,230,216,0.14)"; ctx.lineWidth = 1; ctx.stroke();
+}
+
+let lastFrame = 0;
+function loop(t) {
+  if (t - lastFrame > 33) { drawGlobe(); lastFrame = t; tick(); }
+  requestAnimationFrame(loop);
+}
+
+function tick() {
+  const d = now();
+  $("utc").textContent = d.toISOString().slice(11, 16) + " UTC";
+  if (!nextAt) return;
+  const left = Math.max(0, nextAt - Date.now());
+  $("countdown").textContent = `Moving west in ${Math.floor(left / 60000)}:${String(Math.floor(left / 1000) % 60).padStart(2, "0")}`;
+  if (left === 0 && !busy) go();
+}
+
+/* ---------------- Controls ---------------- */
+$("vol").value = store.get("vol", 0.8);
+$("vol").addEventListener("input", () => { if (deck && !paused) deck.volume = volume(); store.set("vol", volume()); });
+$("bplay").addEventListener("click", togglePause);
+$("bnext").addEventListener("click", () => go(current ? [current.focus.id] : []));
+
+function togglePause() {
+  paused = !paused;
+  $("bplay").textContent = paused ? "Play" : "Pause";
+  if (!deck) return;
+  if (paused) deck.pause(); else { deck.volume = volume(); deck.play().catch(() => {}); }
+}
+
+document.addEventListener("keydown", (e) => {
+  if (e.target.tagName === "INPUT") return;
+  if (e.code === "Space") { e.preventDefault(); togglePause(); }
+  if (e.key === "n" || e.key === "N") $("bnext").click();
+  if (e.key === "f" || e.key === "F") {
+    if (document.fullscreenElement) document.exitFullscreen(); else document.documentElement.requestFullscreen().catch(() => {});
+  }
+});
+
+let idleTimer;
+document.addEventListener("mousemove", () => {
+  document.body.classList.remove("idle");
+  clearTimeout(idleTimer);
+  idleTimer = setTimeout(() => document.body.classList.add("idle"), 4000);
+});
+
+/* ---------------- Start ---------------- */
+resize();
+requestAnimationFrame(loop);
+const ready = loadData();
+
+$("begin").addEventListener("click", async () => {
+  $("start").classList.add("gone");
+  // The click itself is what lets the browser play sound from here on.
+  await ready;
+  go();
+});
+</script>
+</body>
+</html>
