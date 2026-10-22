@@ -88,15 +88,16 @@ a { color: inherit; }
 #smeta { margin-top: 4px; font: 400 12px/1.5 var(--mono); color: var(--muted); }
 #smeta a { color: var(--ink-2); text-decoration: none; border-bottom: 1px solid var(--line); }
 
-#controls { display: flex; align-items: center; gap: 10px; margin-top: 16px; }
+#controls { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: 16px; }
 #controls button {
+  flex: 0 0 auto; /* never shrink below the label */
   white-space: nowrap;
   background: rgba(255,255,255,.04); border: 1px solid var(--line); color: var(--ink);
-  height: 34px; min-width: 34px; padding: 0 12px; border-radius: 999px; font: 500 12px var(--mono); cursor: pointer;
+  height: 34px; min-width: 64px; padding: 0 16px; border-radius: 999px; font: 500 12px var(--mono); cursor: pointer;
 }
 #controls button:hover { border-color: rgba(236,230,216,.3); }
-#vol { flex: 1; accent-color: var(--dawn); }
-#countdown { font: 400 12px var(--mono); color: var(--muted); white-space: nowrap; }
+#vol { flex: 1 1 120px; min-width: 120px; accent-color: var(--dawn); }
+#countdown { flex: 0 0 auto; font: 400 12px var(--mono); color: var(--muted); white-space: nowrap; }
 
 #also { margin-top: 16px; font: 400 12px/1.6 var(--mono); color: var(--muted); }
 #also b { color: var(--ink-2); font-weight: 400; }
